@@ -62,7 +62,7 @@ def process_url(args):
 def main():
     url = "https://noolaham.org/wiki/index.php/%E0%AE%AE%E0%AF%81%E0%AE%A4%E0%AE%B1%E0%AF%8D_%E0%AE%AA%E0%AE%95%E0%AF%8D%E0%AE%95%E0%AE%AE%E0%AF%8D"
 
-    num_processes = 50
+    num_processes = 500
     print("Compiling...")  # Added message indicating the script is running
     with Manager() as manager:
         checked_links = manager.list()
