@@ -1,10 +1,13 @@
 import requests
 from bs4 import BeautifulSoup
+import re
 from urllib.parse import urljoin, urlparse
 from collections import deque
-from multiprocessing import Pool, Manager
+from openpyxl import load_workbook, Workbook
+from multiprocessing import Pool
 
-def get_pdf_links(url, checked_links):
+
+def get_pdf_links(url, filename):
     visited = set()
     queue = deque([url])
     pdf_issues = []
@@ -18,60 +21,75 @@ def get_pdf_links(url, checked_links):
         try:
             response = requests.get(current_url)
             response.raise_for_status()
-        except requests.exceptions.HTTPError:
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTPError: {e} for url: {current_url}")
             continue
 
-        soup = None
-        parsers = ['html.parser', 'lxml', 'xml']
-        for parser in parsers:
-            try:
-                soup = BeautifulSoup(response.content, parser)
-                break
-            except:
-                pass
-
-        if not soup:
-            print(f"Failed to parse content from page: {current_url}")
-            continue
+        soup = BeautifulSoup(response.content, 'lxml')
 
         for link in soup.find_all('a', href=True):
             href = link['href']
             full_url = urljoin(current_url, href)
 
-            if full_url.endswith('.pdf') and full_url not in checked_links:
-                checked_links.append(full_url)
+            if re.search(r'.*\.pdf$', href):
+                print(f"PDF found: {full_url} on page: {current_url}")
 
                 try:
                     pdf_response = requests.get(full_url)
                     pdf_response.raise_for_status()
+                    update_excel(filename, (full_url, current_url), column='working')
                 except requests.exceptions.RequestException as e:
                     print(f"Failed to load PDF: {full_url} from page: {current_url} with error: {e}")
                     pdf_issues.append((full_url, current_url))
-
-            elif urlparse(full_url).netloc == urlparse(url).netloc and full_url not in visited:
-                queue.append(full_url)
+                    update_excel(filename, (full_url, current_url), column='broken')
+            else:
+                if urlparse(full_url).netloc == urlparse(url).netloc and full_url not in visited:
+                    queue.append(full_url)
 
     return pdf_issues
 
+
+def initialize_excel(filename):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'PDF Links'
+    ws.append(['Working PDF Link', 'Found on Page', 'Broken PDF Link', 'Found on Page'])
+    wb.save(filename)
+
+
+def update_excel(filename, data, column):
+    wb = load_workbook(filename)
+    ws = wb['PDF Links']
+
+    if column == 'working':
+        ws.append([data[0], data[1], None, None])
+    elif column == 'broken':
+        ws.append([None, None, data[0], data[1]])
+
+    wb.save(filename)
+
+
 def process_url(args):
-    url, checked_links = args
-    pdf_issues = get_pdf_links(url, checked_links)
-    for link, page_url in pdf_issues:
-        print(f"Failed to load PDF link: {link} (found on page: {page_url})")
+    url, filename = args
+    get_pdf_links(url, filename)
+
 
 def main():
-    url = "https://noolaham.org/wiki/index.php/%E0%AE%AE%E0%AF%81%E0%AE%A4%E0%AE%B1%E0%AF%8D_%E0%AE%AA%E0%AE%95%E0%AF%8D%E0%AE%95%E0%AE%AE%E0%AF%8D"
+    url = input("Plesae enter the URL to scrape for PDF links: ").strip()
+    if not urlparse(url).scheme:
+        url = 'http://' + url
+    filename = 'pdf_links.xlsx'
 
-    num_processes = 500
-    print("Compiling...")  # Added message indicating the script is running
-    with Manager() as manager:
-        checked_links = manager.list()
-        urls = [(url, checked_links)] * num_processes
+    initialize_excel(filename)
 
-        with Pool(processes=num_processes) as pool:
-            pool.map(process_url, urls)
+    num_processes = 4
+    urls = [(url, filename)] * num_processes
 
-    print("Compilation finished!")  # Added message indicating the script has finished running
+    with Pool(processes=num_processes) as pool:
+        pool.map(process_url, urls)
+
+    print(f"PDF links have been saved to '{filename}'.")
+
 
 if __name__ == "__main__":
     main()
